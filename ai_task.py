@@ -41,7 +41,6 @@ class OllamaTaskEntity(
 
     _attr_supported_features = (
         ai_task.AITaskEntityFeature.GENERATE_DATA
-        | ai_task.AITaskEntityFeature.SUPPORT_ATTACHMENTS
     )
 
     async def _async_generate_data(
