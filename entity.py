@@ -107,7 +107,7 @@ def _convert_content(
         )
     if isinstance(chat_content, conversation.UserContent):
         images: list[ollama.Image] = []
-        for attachment in chat_content.attachments or ():
+        for attachment in getattr(chat_content, "attachments", []):
             if not attachment.mime_type.startswith("image/"):
                 raise HomeAssistantError(
                     translation_domain=DOMAIN,
