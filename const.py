@@ -1,8 +1,8 @@
 """Constants for the Ollama integration."""
 
-DOMAIN = "ollama"
+DOMAIN = "custom_ollama"
 
-DEFAULT_NAME = "Ollama"
+DEFAULT_NAME = "Custom Ollama"
 
 CONF_MODEL = "model"
 CONF_PROMPT = "prompt"
