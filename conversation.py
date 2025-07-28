@@ -83,4 +83,11 @@ class OllamaConversationEntity(
 
         await self._async_handle_chat_log(chat_log)
 
-        return conversation.async_get_result_from_chat_log(user_input, chat_log)
+        return await conversation.async_converse(
+            hass=self.hass,
+            text=user_input.text,
+            context=user_input.context,
+            conversation_id=user_input.conversation_id,
+            language=user_input.language,
+            agent_id=user_input.agent_id,
+        )
