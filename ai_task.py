@@ -12,8 +12,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util.json import json_loads
 
-from .entity import BaseLLMEntity
-
+from .entity import OllamaBaseLLMEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,18 +28,21 @@ async def async_setup_entry(
             continue
 
         async_add_entities(
-            [CustomLLMTaskEntity(config_entry, subentry)],
+            [OllamaTaskEntity(config_entry, subentry)],
             config_subentry_id=subentry.subentry_id,
         )
 
 
-class CustomLLMTaskEntity(
+class OllamaTaskEntity(
     ai_task.AITaskEntity,
-    BaseLLMEntity,
+    OllamaBaseLLMEntity,
 ):
-    """Custom LLM AI Task entity."""
+    """Ollama AI Task entity."""
 
-    _attr_supported_features = ai_task.AITaskEntityFeature.GENERATE_DATA
+    _attr_supported_features = (
+        ai_task.AITaskEntityFeature.GENERATE_DATA
+        | ai_task.AITaskEntityFeature.SUPPORT_ATTACHMENTS
+    )
 
     async def _async_generate_data(
         self,
@@ -70,7 +72,7 @@ class CustomLLMTaskEntity(
                 err,
                 text,
             )
-            raise HomeAssistantError("Error with CustomLLM structured response") from err
+            raise HomeAssistantError("Error with Ollama structured response") from err
 
         return ai_task.GenDataTaskResult(
             conversation_id=chat_log.conversation_id,

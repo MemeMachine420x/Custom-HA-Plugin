@@ -1,24 +1,23 @@
-"""The conversation platform for the Custom LLM integration."""
+"""The conversation platform for the Ollama integration."""
 
 from __future__ import annotations
 
 from typing import Literal
 
 from homeassistant.components import conversation
-from homeassistant.config_entries import ConfigSubentry, ConfigEntry
+from homeassistant.config_entries import ConfigSubentry
 from homeassistant.const import CONF_LLM_HASS_API, MATCH_ALL
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import intent
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from . import CustomLLMConfigEntry  # Updated type alias
+from . import OllamaConfigEntry
 from .const import CONF_PROMPT, DOMAIN
-from .entity import BaseLLMEntity  # Renamed base entity
+from .entity import OllamaBaseLLMEntity
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    config_entry: CustomLLMConfigEntry,
+    config_entry: OllamaConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up conversation entities."""
@@ -27,21 +26,21 @@ async def async_setup_entry(
             continue
 
         async_add_entities(
-            [CustomLLMConversationEntity(config_entry, subentry)],
+            [OllamaConversationEntity(config_entry, subentry)],
             config_subentry_id=subentry.subentry_id,
         )
 
 
-class CustomLLMConversationEntity(
+class OllamaConversationEntity(
     conversation.ConversationEntity,
     conversation.AbstractConversationAgent,
-    BaseLLMEntity,
+    OllamaBaseLLMEntity,
 ):
-    """Custom LLM conversation agent."""
+    """Ollama conversation agent."""
 
-    _attr_supports_streaming = False  # Set to True if your endpoint supports streaming
+    _attr_supports_streaming = True
 
-    def __init__(self, entry: CustomLLMConfigEntry, subentry: ConfigSubentry) -> None:
+    def __init__(self, entry: OllamaConfigEntry, subentry: ConfigSubentry) -> None:
         """Initialize the agent."""
         super().__init__(entry, subentry)
         if self.subentry.data.get(CONF_LLM_HASS_API):
@@ -69,7 +68,7 @@ class CustomLLMConversationEntity(
         user_input: conversation.ConversationInput,
         chat_log: conversation.ChatLog,
     ) -> conversation.ConversationResult:
-        """Call the custom LLM API."""
+        """Call the API."""
         settings = {**self.entry.data, **self.subentry.data}
 
         try:
@@ -84,14 +83,4 @@ class CustomLLMConversationEntity(
 
         await self._async_handle_chat_log(chat_log)
 
-        intent_response = intent.IntentResponse(language=user_input.language)
-        if not isinstance(chat_log.content[-1], conversation.AssistantContent):
-            raise TypeError(
-                f"Unexpected last message type: {type(chat_log.content[-1])}"
-            )
-        intent_response.async_set_speech(chat_log.content[-1].content or "")
-        return conversation.ConversationResult(
-            response=intent_response,
-            conversation_id=chat_log.conversation_id,
-            continue_conversation=chat_log.continue_conversation,
-        )
+        return conversation.async_get_result_from_chat_log(user_input, chat_log)

@@ -7,6 +7,7 @@ import logging
 from types import MappingProxyType
 
 import httpx
+import ollama
 
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import CONF_URL, Platform
@@ -49,7 +50,8 @@ __all__ = [
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 PLATFORMS = (Platform.AI_TASK, Platform.CONVERSATION)
 
-type CustomLLMConfigEntry = ConfigEntry[httpx.AsyncClient]
+type OllamaConfigEntry = ConfigEntry[ollama.AsyncClient]
+
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up Ollama."""
@@ -57,19 +59,13 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     return True
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: CustomLLMConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: OllamaConfigEntry) -> bool:
     """Set up Ollama from a config entry."""
     settings = {**entry.data, **entry.options}
-    client = httpx.AsyncClient(
-    base_url=settings[CONF_URL],
-    timeout=DEFAULT_TIMEOUT,
-    verify=get_default_context()
-    )
-
+    client = ollama.AsyncClient(host=settings[CONF_URL], verify=get_default_context())
     try:
         async with asyncio.timeout(DEFAULT_TIMEOUT):
-            response = await client.post("/test", json={"prompt": "ping"})
-            response.raise_for_status()
+            await client.list()
     except (TimeoutError, httpx.ConnectError) as err:
         raise ConfigEntryNotReady(err) from err
 
@@ -88,7 +84,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def async_update_options(hass: HomeAssistant, entry: CustomLLMConfigEntry) -> None:
+async def async_update_options(hass: HomeAssistant, entry: OllamaConfigEntry) -> None:
     """Update options."""
     await hass.config_entries.async_reload(entry.entry_id)
 
@@ -173,7 +169,7 @@ async def async_migrate_integration(hass: HomeAssistant) -> None:
             )
 
 
-async def async_migrate_entry(hass: HomeAssistant, entry: CustomLLMConfigEntry) -> bool:
+async def async_migrate_entry(hass: HomeAssistant, entry: OllamaConfigEntry) -> bool:
     """Migrate entry."""
     _LOGGER.debug("Migrating from version %s:%s", entry.version, entry.minor_version)
 
