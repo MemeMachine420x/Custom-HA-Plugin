@@ -31,51 +31,15 @@ from .const import (
 )
 from .models import MessageHistory, MessageRole
 
-# Max number of back and forth with the LLM to generate a response
-MAX_TOOL_ITERATIONS = 10
+# Tool iterations removed since proxy doesn't handle tool calls
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def _format_tool(
-    tool: llm.Tool, custom_serializer: Callable[[Any], Any] | None
-) -> dict[str, Any]:
-    """Format tool specification."""
-    tool_spec = {
-        "name": tool.name,
-        "parameters": convert(tool.parameters, custom_serializer=custom_serializer),
-    }
-    if tool.description:
-        tool_spec["description"] = tool.description
-    return {"type": "function", "function": tool_spec}
 
 
-def _fix_invalid_arguments(value: Any) -> Any:
-    """Attempt to repair incorrectly formatted json function arguments.
-
-    Small models (for example llama3.1 8B) may produce invalid argument values
-    which we attempt to repair here.
-    """
-    if not isinstance(value, str):
-        return value
-    if (value.startswith("[") and value.endswith("]")) or (
-        value.startswith("{") and value.endswith("}")
-    ):
-        try:
-            return json.loads(value)
-        except json.decoder.JSONDecodeError:
-            pass
-    return value
 
 
-def _parse_tool_args(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Rewrite ollama tool arguments.
-
-    This function improves tool use quality by fixing common mistakes made by
-    small local tool use models. This will repair invalid json arguments and
-    omit unnecessary arguments with empty values that will fail intent parsing.
-    """
-    return {k: _fix_invalid_arguments(v) for k, v in arguments.items() if v}
 
 
 def _convert_content(
@@ -93,33 +57,13 @@ def _convert_content(
             role=MessageRole.ASSISTANT.value,
             content="",
         )
-    if isinstance(chat_content, conversation.ToolResultContent):
-        # Safely handle tool_result that might be None
-        tool_result = getattr(chat_content, "tool_result", None) or {}
-        return ollama.Message(
-            role=MessageRole.TOOL.value,
-            content=json.dumps(tool_result),
-        )
+
     if isinstance(chat_content, conversation.AssistantContent):
-        # Safely handle tool_calls that might be None
-        tool_calls = getattr(chat_content, "tool_calls", None)
-        ollama_tool_calls = []
-        if tool_calls is not None:
-            ollama_tool_calls = [
-                ollama.Message.ToolCall(
-                    function=ollama.Message.ToolCall.Function(
-                        name=tool_call.tool_name,
-                        arguments=tool_call.tool_args,
-                    )
-                )
-                for tool_call in tool_calls
-            ]
         # Safely handle content that might be None
         content = getattr(chat_content, "content", "") or ""
         return ollama.Message(
             role=MessageRole.ASSISTANT.value,
             content=content,
-            tool_calls=ollama_tool_calls or None,
         )
     if isinstance(chat_content, conversation.UserContent):
         images: list[ollama.Image] = []
@@ -175,14 +119,7 @@ async def _transform_stream(
         if new_msg:
             new_msg = False
             chunk["role"] = "assistant"
-        if (tool_calls := response_message.get("tool_calls")) is not None:
-            chunk["tool_calls"] = [
-                llm.ToolInput(
-                    tool_name=tool_call["function"]["name"],
-                    tool_args=_parse_tool_args(tool_call["function"]["arguments"]),
-                )
-                for tool_call in tool_calls
-            ]
+
         if (content := response_message.get("content")) is not None:
             chunk["content"] = content
         if response_message.get("done"):
@@ -223,12 +160,8 @@ class OllamaBaseLLMEntity(Entity):
         client = self.entry.runtime_data
         model = settings[CONF_MODEL]
 
-        tools: list[dict[str, Any]] | None = None
-        if chat_log.llm_api:
-            tools = [
-                _format_tool(tool, chat_log.llm_api.custom_serializer)
-                for tool in chat_log.llm_api.tools
-            ]
+        # Disable tools since proxy doesn't handle them
+        tools = None
 
         # Filter out None content and log any issues
         valid_content = []
@@ -255,44 +188,40 @@ class OllamaBaseLLMEntity(Entity):
                 ),
             )
 
-        # Get response
-        # To prevent infinite loops, we limit the number of iterations
-        for _iteration in range(MAX_TOOL_ITERATIONS):
-            try:
-                response_generator = await client.chat(
-                    model=model,
-                    # Make a copy of the messages because we mutate the list later
-                    messages=list(message_history.messages),
-                    tools=tools,
-                    stream=True,
-                    # keep_alive requires specifying unit. In this case, seconds
-                    keep_alive=f"{settings.get(CONF_KEEP_ALIVE, DEFAULT_KEEP_ALIVE)}s",
-                    options={CONF_NUM_CTX: settings.get(CONF_NUM_CTX, DEFAULT_NUM_CTX)},
-                    think=settings.get(CONF_THINK),
-                    format=output_format,
-                )
-            except (ollama.RequestError, ollama.ResponseError) as err:
-                _LOGGER.error("Unexpected error talking to Ollama server: %s", err)
-                raise HomeAssistantError(
-                    f"Sorry, I had a problem talking to the Ollama server: {err}"
-                ) from err
-
-            # Process streaming content and filter out None values
-            streaming_content = []
-            async for content in chat_log.async_add_delta_content_stream(
-                self.entity_id, _transform_stream(response_generator)
-            ):
-                if content is None:
-                    _LOGGER.warning("Found None content in streaming response, skipping")
-                    continue
-                streaming_content.append(content)
-            
-            message_history.messages.extend(
-                [_convert_content(content) for content in streaming_content]
+        # Get response - single iteration since proxy doesn't handle tool calls
+        try:
+            response_generator = await client.chat(
+                model=model,
+                # Make a copy of the messages because we mutate the list later
+                messages=list(message_history.messages),
+                tools=tools,
+                stream=True,
+                # keep_alive requires specifying unit. In this case, seconds
+                keep_alive=f"{settings.get(CONF_KEEP_ALIVE, DEFAULT_KEEP_ALIVE)}s",
+                options={CONF_NUM_CTX: settings.get(CONF_NUM_CTX, DEFAULT_NUM_CTX)},
+                think=settings.get(CONF_THINK),
+                format=output_format,
             )
+        except (ollama.RequestError, ollama.ResponseError) as err:
+            _LOGGER.error("Unexpected error talking to Ollama server: %s", err)
+            raise HomeAssistantError(
+                f"Sorry, I had a problem talking to the Ollama server: {err}"
+            ) from err
 
-            if not chat_log.unresponded_tool_results:
-                break
+        # Process streaming content and filter out None values
+        streaming_content = []
+        async for content in chat_log.async_add_delta_content_stream(
+            self.entity_id, _transform_stream(response_generator)
+        ):
+            if content is None:
+                _LOGGER.warning("Found None content in streaming response, skipping")
+                continue
+            streaming_content.append(content)
+        
+        # Add response to message history for context in future conversations
+        message_history.messages.extend(
+            [_convert_content(content) for content in streaming_content]
+        )
 
     def _trim_history(self, message_history: MessageHistory, max_messages: int) -> None:
         """Trims excess messages from a single history.
