@@ -29,7 +29,7 @@ from .const import (
     DEFAULT_NUM_CTX,
     DOMAIN,
 )
-from .models import MessageHistory, MessageRole
+from .models import MessageRole
 
 # Tool iterations removed since proxy doesn't handle tool calls
 
@@ -163,19 +163,19 @@ class OllamaBaseLLMEntity(Entity):
         # Disable tools since proxy doesn't handle them
         tools = None
 
-        # Filter out None content and log any issues
-        valid_content = []
+        # Convert chat log content to Ollama message format
+        messages = []
         for content in chat_log.content:
             if content is None:
                 _LOGGER.warning("Found None content in chat_log.content, skipping")
                 continue
-            valid_content.append(content)
+            messages.append(_convert_content(content))
         
-        message_history: MessageHistory = MessageHistory(
-            [_convert_content(content) for content in valid_content]
-        )
+        # Apply history trimming
         max_messages = int(settings.get(CONF_MAX_HISTORY, DEFAULT_MAX_HISTORY))
-        self._trim_history(message_history, max_messages)
+        if max_messages > 0 and len(messages) > max_messages * 2 + 1:
+            # Keep system prompt (first message) and recent messages
+            messages = [messages[0]] + messages[-(max_messages * 2):]
 
         output_format: dict[str, Any] | None = None
         if structure:
@@ -192,8 +192,7 @@ class OllamaBaseLLMEntity(Entity):
         try:
             response_generator = await client.chat(
                 model=model,
-                # Make a copy of the messages because we mutate the list later
-                messages=list(message_history.messages),
+                messages=messages,
                 tools=tools,
                 stream=True,
                 # keep_alive requires specifying unit. In this case, seconds
@@ -208,44 +207,12 @@ class OllamaBaseLLMEntity(Entity):
                 f"Sorry, I had a problem talking to the Ollama server: {err}"
             ) from err
 
-        # Process streaming content and filter out None values
-        streaming_content = []
+        # Process streaming content - Home Assistant handles adding to chat log
         async for content in chat_log.async_add_delta_content_stream(
             self.entity_id, _transform_stream(response_generator)
         ):
             if content is None:
                 _LOGGER.warning("Found None content in streaming response, skipping")
                 continue
-            streaming_content.append(content)
-        
-        # Add response to message history for context in future conversations
-        message_history.messages.extend(
-            [_convert_content(content) for content in streaming_content]
-        )
 
-    def _trim_history(self, message_history: MessageHistory, max_messages: int) -> None:
-        """Trims excess messages from a single history.
 
-        This sets the max history to allow a configurable size history may take
-        up in the context window.
-
-        Note that some messages in the history may not be from ollama only, and
-        may come from other anents, so the assumptions here may not strictly hold,
-        but generally should be effective.
-        """
-        if max_messages < 1:
-            # Keep all messages
-            return
-
-        # Ignore the in progress user message
-        num_previous_rounds = message_history.num_user_messages - 1
-        if num_previous_rounds >= max_messages:
-            # Trim history but keep system prompt (first message).
-            # Every other message should be an assistant message, so keep 2x
-            # message objects. Also keep the last in progress user message
-            num_keep = 2 * max_messages + 1
-            drop_index = len(message_history.messages) - num_keep
-            message_history.messages = [
-                message_history.messages[0],
-                *message_history.messages[drop_index:],
-            ]

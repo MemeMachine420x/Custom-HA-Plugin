@@ -1,9 +1,6 @@
 """Models for Ollama integration."""
 
-from dataclasses import dataclass
 from enum import StrEnum
-
-import ollama
 
 
 class MessageRole(StrEnum):
@@ -14,14 +11,4 @@ class MessageRole(StrEnum):
     ASSISTANT = "assistant"
 
 
-@dataclass
-class MessageHistory:
-    """Chat message history."""
 
-    messages: list[ollama.Message]
-    """List of message history, including system prompt and assistant responses."""
-
-    @property
-    def num_user_messages(self) -> int:
-        """Return a count of user messages."""
-        return sum(m["role"] == MessageRole.USER.value for m in self.messages)
