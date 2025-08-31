@@ -164,72 +164,63 @@ class OllamaBaseLLMEntity(Entity):
         
         self._processing_chat_log = True
         
-        try:
-            settings = {**self.entry.data, **self.subentry.data}
+            # Convert chat log content to Ollama message format
+            messages = []
+            for content in chat_log.content:
+                if content is None:
+                    _LOGGER.warning("Found None content in chat_log.content, skipping")
+                    continue
+                messages.append(_convert_content(content))
+            
+            # Apply history trimming
+            max_messages = int(settings.get(CONF_MAX_HISTORY, DEFAULT_MAX_HISTORY))
+            if max_messages > 0 and len(messages) > max_messages * 2 + 1:
+                # Keep system prompt (first message) and recent messages
+                messages = [messages[0]] + messages[-(max_messages * 2):]
+            
+            _LOGGER.info("Sending %d messages to Ollama", len(messages))
+            for i, msg in enumerate(messages):
+                _LOGGER.debug("Message %d: role=%s, content_length=%d", i, msg.get("role", "unknown"), len(str(msg.get("content", ""))))
 
-            client = self.entry.runtime_data
-            model = settings[CONF_MODEL]
+            output_format: dict[str, Any] | None = None
+            if structure:
+                output_format = convert(
+                    structure,
+                    custom_serializer=(
+                        chat_log.llm_api.custom_serializer
+                        if chat_log.llm_api
+                        else llm.selector_serializer
+                    ),
+                )
 
-            # Disable tools since proxy doesn't handle them
-            tools = None
+            # Get response - single iteration since proxy doesn't handle tool calls
+            try:
+                response_generator = await client.chat(
+                    model=model,
+                    messages=messages,
+                    tools=tools,
+                    stream=True,
+                    # keep_alive requires specifying unit. In this case, seconds
+                    keep_alive=f"{settings.get(CONF_KEEP_ALIVE, DEFAULT_KEEP_ALIVE)}s",
+                    options={CONF_NUM_CTX: settings.get(CONF_NUM_CTX, DEFAULT_NUM_CTX)},
+                    think=settings.get(CONF_THINK),
+                    format=output_format,
+                )
+            except (ollama.RequestError, ollama.ResponseError) as err:
+                _LOGGER.error("Unexpected error talking to Ollama server: %s", err)
+                raise HomeAssistantError(
+                    f"Sorry, I had a problem talking to the Ollama server: {err}"
+                ) from err
 
-        # Convert chat log content to Ollama message format
-        messages = []
-        for content in chat_log.content:
-            if content is None:
-                _LOGGER.warning("Found None content in chat_log.content, skipping")
-                continue
-            messages.append(_convert_content(content))
-        
-        # Apply history trimming
-        max_messages = int(settings.get(CONF_MAX_HISTORY, DEFAULT_MAX_HISTORY))
-        if max_messages > 0 and len(messages) > max_messages * 2 + 1:
-            # Keep system prompt (first message) and recent messages
-            messages = [messages[0]] + messages[-(max_messages * 2):]
-        
-        _LOGGER.info("Sending %d messages to Ollama", len(messages))
-        for i, msg in enumerate(messages):
-            _LOGGER.debug("Message %d: role=%s, content_length=%d", i, msg.get("role", "unknown"), len(str(msg.get("content", ""))))
-
-        output_format: dict[str, Any] | None = None
-        if structure:
-            output_format = convert(
-                structure,
-                custom_serializer=(
-                    chat_log.llm_api.custom_serializer
-                    if chat_log.llm_api
-                    else llm.selector_serializer
-                ),
-            )
-
-        # Get response - single iteration since proxy doesn't handle tool calls
-        try:
-            response_generator = await client.chat(
-                model=model,
-                messages=messages,
-                tools=tools,
-                stream=True,
-                # keep_alive requires specifying unit. In this case, seconds
-                keep_alive=f"{settings.get(CONF_KEEP_ALIVE, DEFAULT_KEEP_ALIVE)}s",
-                options={CONF_NUM_CTX: settings.get(CONF_NUM_CTX, DEFAULT_NUM_CTX)},
-                think=settings.get(CONF_THINK),
-                format=output_format,
-            )
-        except (ollama.RequestError, ollama.ResponseError) as err:
-            _LOGGER.error("Unexpected error talking to Ollama server: %s", err)
-            raise HomeAssistantError(
-                f"Sorry, I had a problem talking to the Ollama server: {err}"
-            ) from err
-
-        # Process streaming content - Home Assistant handles adding to chat log
-        async for content in chat_log.async_add_delta_content_stream(
-            self.entity_id, _transform_stream(response_generator)
-        ):
-            if content is None:
-                _LOGGER.warning("Found None content in streaming response, skipping")
-                continue
-        
-        _LOGGER.info("Finished _async_handle_chat_log - chat_log.content length: %d", len(chat_log.content))
+            # Process streaming content - Home Assistant handles adding to chat log
+            async for content in chat_log.async_add_delta_content_stream(
+                self.entity_id, _transform_stream(response_generator)
+            ):
+                if content is None:
+                    _LOGGER.warning("Found None content in streaming response, skipping")
+                    continue
+            
+            _LOGGER.info("Finished _async_handle_chat_log - chat_log.content length: %d", len(chat_log.content))
         
         finally:
             self._processing_chat_log = False
