@@ -162,8 +162,14 @@ class OllamaBaseLLMEntity(Entity):
             _LOGGER.warning("Already processing chat log, skipping to prevent infinite loop")
             return
         
-        self._processing_chat_log = True
-        
+        try:
+            settings = {**self.entry.data, **self.subentry.data}
+            client = self.entry.runtime_data
+            model = settings[CONF_MODEL]
+
+            # Disable tools since proxy doesn't handle them
+            tools = None
+
             # Convert chat log content to Ollama message format
             messages = []
             for content in chat_log.content:
