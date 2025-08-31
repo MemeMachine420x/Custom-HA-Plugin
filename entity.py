@@ -83,46 +83,69 @@ def _convert_content(
         conversation.Content
         | conversation.ToolResultContent
         | conversation.AssistantContent
+        | None
     ),
 ) -> ollama.Message:
     """Create tool response content."""
-    if isinstance(chat_content, conversation.ToolResultContent):
-        return ollama.Message(
-            role=MessageRole.TOOL.value,
-            content=json.dumps(chat_content.tool_result),
-        )
-    if isinstance(chat_content, conversation.AssistantContent):
+    if chat_content is None:
+        # Handle None content gracefully
         return ollama.Message(
             role=MessageRole.ASSISTANT.value,
-            content=chat_content.content,
-            tool_calls=[
+            content="",
+        )
+    if isinstance(chat_content, conversation.ToolResultContent):
+        # Safely handle tool_result that might be None
+        tool_result = getattr(chat_content, "tool_result", None) or {}
+        return ollama.Message(
+            role=MessageRole.TOOL.value,
+            content=json.dumps(tool_result),
+        )
+    if isinstance(chat_content, conversation.AssistantContent):
+        # Safely handle tool_calls that might be None
+        tool_calls = getattr(chat_content, "tool_calls", None)
+        ollama_tool_calls = []
+        if tool_calls is not None:
+            ollama_tool_calls = [
                 ollama.Message.ToolCall(
                     function=ollama.Message.ToolCall.Function(
                         name=tool_call.tool_name,
                         arguments=tool_call.tool_args,
                     )
                 )
-                for tool_call in chat_content.tool_calls or ()
-            ],
+                for tool_call in tool_calls
+            ]
+        # Safely handle content that might be None
+        content = getattr(chat_content, "content", "") or ""
+        return ollama.Message(
+            role=MessageRole.ASSISTANT.value,
+            content=content,
+            tool_calls=ollama_tool_calls or None,
         )
     if isinstance(chat_content, conversation.UserContent):
         images: list[ollama.Image] = []
-        for attachment in chat_content.attachments or ():
-            if not attachment.mime_type.startswith("image/"):
-                raise HomeAssistantError(
-                    translation_domain=DOMAIN,
-                    translation_key="unsupported_attachment_type",
-                )
-            images.append(ollama.Image(value=attachment.path))
+        # Safely handle attachments that might be None
+        attachments = getattr(chat_content, "attachments", None)
+        if attachments is not None:
+            for attachment in attachments:
+                if not attachment.mime_type.startswith("image/"):
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN,
+                        translation_key="unsupported_attachment_type",
+                    )
+                images.append(ollama.Image(value=attachment.path))
+        # Safely handle content that might be None
+        content = getattr(chat_content, "content", "") or ""
         return ollama.Message(
             role=MessageRole.USER.value,
-            content=chat_content.content,
+            content=content,
             images=images or None,
         )
     if isinstance(chat_content, conversation.SystemContent):
+        # Safely handle content that might be None
+        content = getattr(chat_content, "content", "") or ""
         return ollama.Message(
             role=MessageRole.SYSTEM.value,
-            content=chat_content.content,
+            content=content,
         )
     raise TypeError(f"Unexpected content type: {type(chat_content)}")
 
@@ -207,8 +230,16 @@ class OllamaBaseLLMEntity(Entity):
                 for tool in chat_log.llm_api.tools
             ]
 
+        # Filter out None content and log any issues
+        valid_content = []
+        for content in chat_log.content:
+            if content is None:
+                _LOGGER.warning("Found None content in chat_log.content, skipping")
+                continue
+            valid_content.append(content)
+        
         message_history: MessageHistory = MessageHistory(
-            [_convert_content(content) for content in chat_log.content]
+            [_convert_content(content) for content in valid_content]
         )
         max_messages = int(settings.get(CONF_MAX_HISTORY, DEFAULT_MAX_HISTORY))
         self._trim_history(message_history, max_messages)
@@ -246,13 +277,18 @@ class OllamaBaseLLMEntity(Entity):
                     f"Sorry, I had a problem talking to the Ollama server: {err}"
                 ) from err
 
+            # Process streaming content and filter out None values
+            streaming_content = []
+            async for content in chat_log.async_add_delta_content_stream(
+                self.entity_id, _transform_stream(response_generator)
+            ):
+                if content is None:
+                    _LOGGER.warning("Found None content in streaming response, skipping")
+                    continue
+                streaming_content.append(content)
+            
             message_history.messages.extend(
-                [
-                    _convert_content(content)
-                    async for content in chat_log.async_add_delta_content_stream(
-                        self.entity_id, _transform_stream(response_generator)
-                    )
-                ]
+                [_convert_content(content) for content in streaming_content]
             )
 
             if not chat_log.unresponded_tool_results:
