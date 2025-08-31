@@ -1,6 +1,7 @@
 {
   "domain": "custom_ollama",
   "name": "Custom Ollama",
+  "version": "1.0.0",
   "after_dependencies": ["assist_pipeline", "intent"],
   "codeowners": ["@synesthesiam"],
   "config_flow": true,
