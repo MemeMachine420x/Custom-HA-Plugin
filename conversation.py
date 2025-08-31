@@ -83,11 +83,8 @@ class OllamaConversationEntity(
 
         await self._async_handle_chat_log(chat_log)
 
-        return await conversation.async_converse(
-            hass=self.hass,
-            text=user_input.text,
-            context=user_input.context,
-            conversation_id=user_input.conversation_id,
-            language=user_input.language,
-            agent_id=user_input.agent_id,
+        # Return a simple conversation result since we've already processed the message
+        return conversation.ConversationResult(
+            response=chat_log.content[-1].content if chat_log.content else "",
+            conversation_id=chat_log.conversation_id,
         )

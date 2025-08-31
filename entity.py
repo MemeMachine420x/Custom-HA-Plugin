@@ -155,13 +155,23 @@ class OllamaBaseLLMEntity(Entity):
         structure: vol.Schema | None = None,
     ) -> None:
         """Generate an answer for the chat log."""
-        settings = {**self.entry.data, **self.subentry.data}
+        _LOGGER.info("Starting _async_handle_chat_log - chat_log.content length: %d", len(chat_log.content))
+        
+        # Prevent infinite loops by checking if we're already processing
+        if hasattr(self, '_processing_chat_log') and self._processing_chat_log:
+            _LOGGER.warning("Already processing chat log, skipping to prevent infinite loop")
+            return
+        
+        self._processing_chat_log = True
+        
+        try:
+            settings = {**self.entry.data, **self.subentry.data}
 
-        client = self.entry.runtime_data
-        model = settings[CONF_MODEL]
+            client = self.entry.runtime_data
+            model = settings[CONF_MODEL]
 
-        # Disable tools since proxy doesn't handle them
-        tools = None
+            # Disable tools since proxy doesn't handle them
+            tools = None
 
         # Convert chat log content to Ollama message format
         messages = []
@@ -176,6 +186,10 @@ class OllamaBaseLLMEntity(Entity):
         if max_messages > 0 and len(messages) > max_messages * 2 + 1:
             # Keep system prompt (first message) and recent messages
             messages = [messages[0]] + messages[-(max_messages * 2):]
+        
+        _LOGGER.info("Sending %d messages to Ollama", len(messages))
+        for i, msg in enumerate(messages):
+            _LOGGER.debug("Message %d: role=%s, content_length=%d", i, msg.get("role", "unknown"), len(str(msg.get("content", ""))))
 
         output_format: dict[str, Any] | None = None
         if structure:
@@ -214,5 +228,10 @@ class OllamaBaseLLMEntity(Entity):
             if content is None:
                 _LOGGER.warning("Found None content in streaming response, skipping")
                 continue
+        
+        _LOGGER.info("Finished _async_handle_chat_log - chat_log.content length: %d", len(chat_log.content))
+        
+        finally:
+            self._processing_chat_log = False
 
 
