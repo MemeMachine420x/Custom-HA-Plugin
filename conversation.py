@@ -100,9 +100,10 @@ class OllamaConversationEntity(
         class MockResponse:
             def __init__(self, content: str):
                 self.content = content
+                self.speech = {"plain": {"speech": content}}
             
             def as_dict(self) -> dict:
-                return {"content": self.content}
+                return {"content": self.content, "speech": self.speech}
         
         # Return a simple conversation result since we've already processed the message
         return conversation.ConversationResult(
