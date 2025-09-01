@@ -81,6 +81,28 @@ class OllamaConversationEntity(
         except conversation.ConverseError as err:
             return err.as_conversation_result()
 
-        # Get the conversation result from the chat log handling
-        result = await self._async_handle_chat_log(chat_log)
-        return result
+        await self._async_handle_chat_log(chat_log)
+
+        # Debug: Check what's in the chat log
+        _LOGGER.debug("Chat log content after processing: %s", [type(c).__name__ for c in chat_log.content])
+        
+        # Find the last assistant content
+        response_text = ""
+        for content in reversed(chat_log.content):
+            if isinstance(content, conversation.AssistantContent):
+                response_text = content.content or ""
+                break
+        
+        # Create a mock response object with as_dict method
+        class MockResponse:
+            def __init__(self, content: str):
+                self.content = content
+            
+            def as_dict(self) -> dict:
+                return {"content": self.content}
+        
+        # Return a simple conversation result since we've already processed the message
+        return conversation.ConversationResult(
+            response=MockResponse(response_text),
+            conversation_id=chat_log.conversation_id,
+        )

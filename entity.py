@@ -153,17 +153,14 @@ class OllamaBaseLLMEntity(Entity):
         self,
         chat_log: conversation.ChatLog,
         structure: vol.Schema | None = None,
-    ) -> conversation.ConversationResult:
+    ) -> None:
         """Generate an answer for the chat log."""
         _LOGGER.info("Starting _async_handle_chat_log - chat_log.content length: %d", len(chat_log.content))
         
         # Prevent infinite loops by checking if we're already processing
         if hasattr(self, '_processing_chat_log') and self._processing_chat_log:
             _LOGGER.warning("Already processing chat log, skipping to prevent infinite loop")
-            return conversation.ConversationResult(
-                response=conversation.AssistantContent(content=""),
-                conversation_id=chat_log.conversation_id,
-            )
+            return
         
         # Set processing flag to prevent infinite loops
         self._processing_chat_log = True
@@ -232,23 +229,6 @@ class OllamaBaseLLMEntity(Entity):
                     continue
             
             _LOGGER.info("Finished _async_handle_chat_log - chat_log.content length: %d", len(chat_log.content))
-            
-            # Return a conversation result with the response
-            # Get the last assistant content from the chat log
-            response_content = None
-            for content in reversed(chat_log.content):
-                if isinstance(content, conversation.AssistantContent) and content.content:
-                    response_content = content
-                    break
-            
-            # If no assistant content found, create an empty one
-            if response_content is None:
-                response_content = conversation.AssistantContent(content="")
-            
-            return conversation.ConversationResult(
-                response=response_content,
-                conversation_id=chat_log.conversation_id,
-            )
         
         finally:
             self._processing_chat_log = False
