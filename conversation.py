@@ -81,10 +81,6 @@ class OllamaConversationEntity(
         except conversation.ConverseError as err:
             return err.as_conversation_result()
 
-        await self._async_handle_chat_log(chat_log)
-
-        # Return a simple conversation result since we've already processed the message
-        return conversation.ConversationResult(
-            response=chat_log.content[-1].content if chat_log.content else "",
-            conversation_id=chat_log.conversation_id,
-        )
+        # Get the conversation result from the chat log handling
+        result = await self._async_handle_chat_log(chat_log)
+        return result

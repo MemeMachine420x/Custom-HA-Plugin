@@ -153,14 +153,20 @@ class OllamaBaseLLMEntity(Entity):
         self,
         chat_log: conversation.ChatLog,
         structure: vol.Schema | None = None,
-    ) -> None:
+    ) -> conversation.ConversationResult:
         """Generate an answer for the chat log."""
         _LOGGER.info("Starting _async_handle_chat_log - chat_log.content length: %d", len(chat_log.content))
         
         # Prevent infinite loops by checking if we're already processing
         if hasattr(self, '_processing_chat_log') and self._processing_chat_log:
             _LOGGER.warning("Already processing chat log, skipping to prevent infinite loop")
-            return
+            return conversation.ConversationResult(
+                response="",
+                conversation_id=chat_log.conversation_id,
+            )
+        
+        # Set processing flag to prevent infinite loops
+        self._processing_chat_log = True
         
         try:
             settings = {**self.entry.data, **self.subentry.data}
@@ -204,7 +210,6 @@ class OllamaBaseLLMEntity(Entity):
                 response_generator = await client.chat(
                     model=model,
                     messages=messages,
-                    tools=tools,
                     stream=True,
                     # keep_alive requires specifying unit. In this case, seconds
                     keep_alive=f"{settings.get(CONF_KEEP_ALIVE, DEFAULT_KEEP_ALIVE)}s",
@@ -227,8 +232,19 @@ class OllamaBaseLLMEntity(Entity):
                     continue
             
             _LOGGER.info("Finished _async_handle_chat_log - chat_log.content length: %d", len(chat_log.content))
+            
+            # Return a conversation result with the response
+            # Get the last assistant content from the chat log
+            response_text = ""
+            for content in reversed(chat_log.content):
+                if isinstance(content, conversation.AssistantContent) and content.content:
+                    response_text = content.content
+                    break
+            
+            return conversation.ConversationResult(
+                response=response_text,
+                conversation_id=chat_log.conversation_id,
+            )
         
         finally:
             self._processing_chat_log = False
-
-
