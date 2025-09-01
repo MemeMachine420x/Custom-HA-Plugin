@@ -161,7 +161,7 @@ class OllamaBaseLLMEntity(Entity):
         if hasattr(self, '_processing_chat_log') and self._processing_chat_log:
             _LOGGER.warning("Already processing chat log, skipping to prevent infinite loop")
             return conversation.ConversationResult(
-                response="",
+                response=conversation.AssistantContent(content=""),
                 conversation_id=chat_log.conversation_id,
             )
         
@@ -235,14 +235,18 @@ class OllamaBaseLLMEntity(Entity):
             
             # Return a conversation result with the response
             # Get the last assistant content from the chat log
-            response_text = ""
+            response_content = None
             for content in reversed(chat_log.content):
                 if isinstance(content, conversation.AssistantContent) and content.content:
-                    response_text = content.content
+                    response_content = content
                     break
             
+            # If no assistant content found, create an empty one
+            if response_content is None:
+                response_content = conversation.AssistantContent(content="")
+            
             return conversation.ConversationResult(
-                response=response_text,
+                response=response_content,
                 conversation_id=chat_log.conversation_id,
             )
         
