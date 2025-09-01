@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
 from homeassistant.components import conversation
@@ -13,6 +14,8 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from . import OllamaConfigEntry
 from .const import CONF_PROMPT, DOMAIN
 from .entity import OllamaBaseLLMEntity
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
